@@ -132,3 +132,54 @@ class EventLogEntry(BaseModel):
     tokens_in: int | None = None
     tokens_out: int | None = None
     created_at: str
+
+
+# -----------------------------------------------------------------------
+# Phase 3: Worker + Compression models
+# -----------------------------------------------------------------------
+
+
+class FunctionChangeRecord(BaseModel):
+    """A single function change reported by the compressor."""
+
+    file: str
+    name: str
+    action: str  # "new" | "modified" | "deleted"
+
+
+class CompressedObservation(BaseModel):
+    """Result of AI compression — becomes an Observation row."""
+
+    title: str
+    summary: str
+    detail: str | None = None
+    files_touched: list[str] = []
+    functions_changed: list[FunctionChangeRecord] = []
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+class SessionSummary(BaseModel):
+    """Result of session summarization."""
+
+    summary: str
+    key_files: list[str] = []
+    key_decisions: list[str] = []
+
+
+class QueueStats(BaseModel):
+    """Queue status counts for debugging."""
+
+    raw: int = 0
+    processing: int = 0
+    done: int = 0
+    error: int = 0
+
+
+class HealthResponse(BaseModel):
+    """Health endpoint response."""
+
+    status: str = "ok"
+    uptime_s: int = 0
+    queue_depth: int = 0
+    observations_today: int = 0
