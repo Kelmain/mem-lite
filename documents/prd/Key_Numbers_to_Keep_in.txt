@@ -1,0 +1,9 @@
+Key Numbers to Keep in Mind
+
+Context injection: ~1,500 tokens (v7) — this is the target to beat or match
+Raw tool output: 10KB–500KB per tool use
+Compressed observation: ~500 tokens (~2KB)
+Compression ratio: 10:1 to 100:1
+Hook latency: ~45ms (non-blocking)
+FTS5 search: sub-millisecond for typical queries
+Session startup overhead: varies (smart-install cache helps, but worker startup + readiness polling adds seconds)
