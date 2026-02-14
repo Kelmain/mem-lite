@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2.0",
+]
 [project.optional-dependencies]
 dev = [
     "bandit>=1.9.3",
@@ -83,7 +85,7 @@ ignore = [
 "__init__.py" = ["F401"]  # Unused imports in __init__
 
 [tool.ruff.lint.isort]
-known-first-party = []
+known-first-party = ["claude_mem_lite"]
 force-single-line = false
 combine-as-imports = true
 
@@ -122,6 +124,7 @@ disallow_untyped_defs = false
 testpaths = [
     "tests",
 ]
+pythonpath = ["src"]
 python_files = ["test_*.py", "*_test.py"]
 python_functions = ["test_*"]
 python_classes = ["Test*"]
