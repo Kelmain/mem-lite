@@ -104,6 +104,14 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_log_time ON event_log(created_at);
         """,
     ),
+    (
+        2,
+        """
+        ALTER TABLE pending_queue ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+        DROP INDEX IF EXISTS idx_queue_status;
+        CREATE INDEX IF NOT EXISTS idx_queue_status ON pending_queue(status, priority, created_at);
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
@@ -116,9 +124,28 @@ def get_version(conn: sqlite3.Connection) -> int:
 
 
 def migrate(conn: sqlite3.Connection) -> None:
-    """Apply all pending migrations sequentially."""
+    """Apply all pending migrations sequentially.
+
+    Uses EXCLUSIVE lock to prevent concurrent migration races.
+    """
     current = get_version(conn)
     for version, sql in MIGRATIONS:
         if version > current:
-            conn.executescript(sql)
-            conn.execute(f"PRAGMA user_version = {version}")
+            # Acquire exclusive lock, re-check version to handle races
+            conn.execute("BEGIN EXCLUSIVE")
+            try:
+                actual = int(conn.execute("PRAGMA user_version").fetchone()[0])
+                if version > actual:
+                    for stmt in _split_sql(sql):
+                        conn.execute(stmt)
+                    conn.execute(f"PRAGMA user_version = {version}")
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            current = version
+
+
+def _split_sql(sql: str) -> list[str]:
+    """Split a multi-statement SQL string into individual statements."""
+    return [s.strip() for s in sql.strip().split(";") if s.strip()]

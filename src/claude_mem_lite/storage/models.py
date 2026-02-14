@@ -117,6 +117,7 @@ class PendingQueueItem(BaseModel):
     tool_name: str
     raw_output: str
     files_touched: str = "[]"
+    priority: str = "normal"
     status: QueueStatus = QueueStatus.RAW
     attempts: int = 0
     created_at: str

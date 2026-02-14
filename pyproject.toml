@@ -7,6 +7,10 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
 ]
+
+[project.scripts]
+claude-mem = "claude_mem_lite.cli.install:main"
+
 [project.optional-dependencies]
 dev = [
     "bandit>=1.9.3",
@@ -83,6 +87,7 @@ ignore = [
     "PLR2004", # Magic values in tests
 ]
 "__init__.py" = ["F401"]  # Unused imports in __init__
+"src/claude_mem_lite/hooks/*.py" = ["PLC0415"]  # Deferred imports for fast hook exit paths
 
 [tool.ruff.lint.isort]
 known-first-party = ["claude_mem_lite"]

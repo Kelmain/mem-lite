@@ -44,22 +44,26 @@ class SQLiteStore:
         """Close the database connection."""
         self.conn.close()
 
-    def checkpoint(self) -> None:
-        """Force WAL checkpoint. Call on session close to keep WAL file small."""
-        self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    def checkpoint(self, mode: str = "PASSIVE") -> None:
+        """WAL checkpoint.
+
+        Modes: PASSIVE (non-blocking), RESTART, TRUNCATE.
+        """
+        assert mode in ("PASSIVE", "RESTART", "TRUNCATE"), f"Invalid mode: {mode}"
+        self.conn.execute(f"PRAGMA wal_checkpoint({mode})")
 
     # -----------------------------------------------------------------------
     # Sessions
     # -----------------------------------------------------------------------
-    def create_session(self, project_dir: str) -> Session:
-        """Create a new session."""
-        session_id = str(uuid.uuid4())
+    def create_session(self, project_dir: str, *, id: str | None = None) -> Session:
+        """Create a new session. Idempotent if id already exists (INSERT OR IGNORE)."""
+        session_id = id or str(uuid.uuid4())
         self.conn.execute(
-            "INSERT INTO sessions (id, project_dir) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO sessions (id, project_dir) VALUES (?, ?)",
             (session_id, project_dir),
         )
         session = self.get_session(session_id)
-        assert session is not None  # Just inserted
+        assert session is not None
         return session
 
     def get_session(self, session_id: str) -> Session | None:
@@ -98,17 +102,25 @@ class SQLiteStore:
                 params,
             )
 
-    def list_sessions(self, status: SessionStatus | None = None) -> list[Session]:
+    def list_sessions(
+        self,
+        status: SessionStatus | None = None,
+        *,
+        limit: int | None = None,
+        status_filter: SessionStatus | None = None,
+    ) -> list[Session]:
         """List sessions ordered by started_at DESC, optionally filtered by status."""
-        if status is not None:
-            rows = self.conn.execute(
-                "SELECT * FROM sessions WHERE status = ? ORDER BY started_at DESC, rowid DESC",
-                (str(status),),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM sessions ORDER BY started_at DESC, rowid DESC"
-            ).fetchall()
+        effective_status = status_filter or status
+        query = "SELECT * FROM sessions"
+        params: list = []
+        if effective_status is not None:
+            query += " WHERE status = ?"
+            params.append(str(effective_status))
+        query += " ORDER BY started_at DESC, rowid DESC"
+        if limit is not None:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self.conn.execute(query, params).fetchall()
         return [Session(**dict(r)) for r in rows]
 
     # -----------------------------------------------------------------------
@@ -387,14 +399,15 @@ class SQLiteStore:
         tool_name: str,
         raw_output: str,
         files_touched: list[str] | None = None,
+        priority: str = "normal",
     ) -> PendingQueueItem:
         """Add item to the processing queue."""
         item_id = str(uuid.uuid4())
         files_json = json.dumps(files_touched or [])
         self.conn.execute(
-            """INSERT INTO pending_queue (id, session_id, tool_name, raw_output, files_touched)
-               VALUES (?, ?, ?, ?, ?)""",
-            (item_id, session_id, tool_name, raw_output, files_json),
+            """INSERT INTO pending_queue (id, session_id, tool_name, raw_output, files_touched, priority)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (item_id, session_id, tool_name, raw_output, files_json, priority),
         )
         row = self.conn.execute("SELECT * FROM pending_queue WHERE id = ?", (item_id,)).fetchone()
         return PendingQueueItem(**dict(row))
@@ -413,7 +426,7 @@ class SQLiteStore:
                   AND id IN (
                     SELECT id FROM pending_queue
                     WHERE status = 'raw'
-                    ORDER BY created_at
+                    ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 WHEN 'low' THEN 2 ELSE 1 END, created_at
                     LIMIT ?
                   )
                 RETURNING *
@@ -454,6 +467,14 @@ class SQLiteStore:
             "SELECT status, COUNT(*) as count FROM pending_queue GROUP BY status"
         ).fetchall()
         return {row["status"]: row["count"] for row in rows}
+
+    def count_pending(self, session_id: str) -> int:
+        """Count pending queue items for a session."""
+        row = self.conn.execute(
+            "SELECT COUNT(*) as cnt FROM pending_queue WHERE session_id = ? AND status = 'raw'",
+            (session_id,),
+        ).fetchone()
+        return int(row["cnt"])
 
     # -----------------------------------------------------------------------
     # Event log (best-effort — never raises)
