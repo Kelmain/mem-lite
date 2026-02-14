@@ -75,7 +75,7 @@ async def test_health_endpoint(tmp_config, store, client, configured_app):
     store.enqueue(session_id=session.id, tool_name="Read", raw_output="output1")
 
     # Set _start_time so uptime_s is computable
-    server_mod._start_time = 0.0  # noqa: SLF001
+    server_mod._start_time = 0.0
 
     response = await client.get("/api/health")
 

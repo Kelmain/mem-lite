@@ -337,7 +337,7 @@ class TestProcessor:
 
         tracker.touch()
         # Directly set the shutdown event (simulating timeout expiry)
-        tracker._shutdown_event.set()  # noqa: SLF001
+        tracker._shutdown_event.set()
 
         assert tracker.should_shutdown is True
 
@@ -392,7 +392,7 @@ class TestAutoSummarization:
         )
 
         # Act
-        await processor._check_pending_summaries()  # noqa: SLF001
+        await processor._check_pending_summaries()
 
         # Assert
         mock_summarizer.summarize_session.assert_called_once_with(session.id)
@@ -438,7 +438,7 @@ class TestAutoSummarization:
         )
 
         # Act
-        await processor._check_pending_summaries()  # noqa: SLF001
+        await processor._check_pending_summaries()
 
         # Assert
         mock_summarizer.summarize_session.assert_not_called()
@@ -472,7 +472,7 @@ class TestAutoSummarization:
         )
 
         # Act
-        await processor._check_pending_summaries()  # noqa: SLF001
+        await processor._check_pending_summaries()
 
         # Assert
         mock_summarizer.summarize_session.assert_not_called()
@@ -489,4 +489,4 @@ class TestAutoSummarization:
         )
 
         # Act + Assert — should not raise
-        await processor._check_pending_summaries()  # noqa: SLF001
+        await processor._check_pending_summaries()

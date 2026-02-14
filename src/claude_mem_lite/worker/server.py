@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import aiosqlite
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 
 from claude_mem_lite.storage.models import HealthResponse, QueueStats
 from claude_mem_lite.worker.compressor import Compressor
@@ -45,7 +45,27 @@ async def lifespan(app: FastAPI):
     compressor = Compressor(config)
     summarizer = Summarizer(db, compressor)
     idle_tracker = IdleTracker(timeout_minutes=30)
-    processor = Processor(db, compressor, idle_tracker)
+
+    # Phase 4: Load embedding model + connect LanceDB (in threads, non-blocking)
+    from claude_mem_lite.search.embedder import Embedder
+    from claude_mem_lite.search.lance_store import LanceStore
+
+    embedder = Embedder(config)
+    embed_loaded = await asyncio.to_thread(embedder.load)
+
+    lance_store = LanceStore(config, embedder)
+    await asyncio.to_thread(lance_store.connect)
+
+    app.state.embedder = embedder
+    app.state.lance_store = lance_store
+
+    processor = Processor(
+        db,
+        compressor,
+        idle_tracker,
+        lance_store=lance_store if embed_loaded else None,
+        embedder=embedder if embed_loaded else None,
+    )
 
     app.state.db = db
     app.state.compressor = compressor
@@ -71,6 +91,11 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 endpoints
+# ---------------------------------------------------------------------------
 
 
 @app.get("/api/health")
@@ -129,6 +154,83 @@ async def queue_stats() -> QueueStats:
         done=stats.get("done", 0),
         error=stats.get("error", 0),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 endpoints
+# ---------------------------------------------------------------------------
+
+
+def _format_search_result(r: dict) -> dict:
+    """Normalize LanceDB result dict to API response format."""
+    return {
+        "observation_id": r.get("observation_id", ""),
+        "session_id": r.get("session_id", ""),
+        "title": r.get("title", ""),
+        "summary": r.get("summary", ""),
+        "files_touched": r.get("files_touched", ""),
+        "score": r.get("_relevance_score", r.get("_distance")),
+        "created_at": r.get("created_at", ""),
+    }
+
+
+@app.get("/api/search")
+async def search(
+    q: str,
+    limit: int = Query(default=5, ge=1, le=20),
+) -> dict:
+    """Hybrid search over observations."""
+    app.state.idle_tracker.touch()
+    embedder = app.state.embedder
+    lance_store = app.state.lance_store
+
+    if embedder.available:
+        results = await asyncio.to_thread(lance_store.search_observations, q, limit)
+        search_type = "hybrid"
+    else:
+        results = await asyncio.to_thread(lance_store.search_fts_only, q, limit)
+        search_type = "fts"
+
+    return {
+        "results": [_format_search_result(r) for r in results],
+        "query": q,
+        "count": len(results),
+        "search_type": search_type,
+    }
+
+
+@app.get("/api/observation/{obs_id}")
+async def get_observation(obs_id: str) -> dict:
+    """Full observation detail — progressive disclosure."""
+    app.state.idle_tracker.touch()
+    db = app.state.db
+    cursor = await db.execute("SELECT * FROM observations WHERE id = ?", (obs_id,))
+    row = await cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    return dict(row)
+
+
+@app.get("/api/callgraph")
+async def callgraph(file: str = Query(...)) -> dict:
+    """Call graph for a given file (best-effort — populated by Phase 2)."""
+    app.state.idle_tracker.touch()
+    db = app.state.db
+
+    cursor = await db.execute(
+        "SELECT qualified_name, kind, signature FROM function_map WHERE file_path = ?",
+        (file,),
+    )
+    functions = [dict(r) for r in await cursor.fetchall()]
+
+    cursor = await db.execute(
+        """SELECT caller_function, callee_file, callee_function, resolution, confidence
+           FROM call_graph WHERE caller_file = ?""",
+        (file,),
+    )
+    edges = [dict(r) for r in await cursor.fetchall()]
+
+    return {"functions": functions, "edges": edges}
 
 
 def run_worker(config: Config) -> None:

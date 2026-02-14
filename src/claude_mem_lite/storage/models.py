@@ -183,3 +183,35 @@ class HealthResponse(BaseModel):
     uptime_s: int = 0
     queue_depth: int = 0
     observations_today: int = 0
+
+
+# -----------------------------------------------------------------------
+# Phase 4: Embeddings + Search models
+# -----------------------------------------------------------------------
+
+
+class EmbeddingStatus(StrEnum):
+    PENDING = "pending"
+    EMBEDDED = "embedded"
+    FAILED = "failed"
+
+
+class SearchResult(BaseModel):
+    """Single search result from hybrid search."""
+
+    observation_id: str
+    session_id: str
+    title: str
+    summary: str
+    files_touched: str = ""
+    score: float | None = None
+    created_at: str = ""
+
+
+class SearchResponse(BaseModel):
+    """Response from the search endpoint."""
+
+    results: list[SearchResult]
+    query: str
+    count: int
+    search_type: str  # "hybrid" or "fts"

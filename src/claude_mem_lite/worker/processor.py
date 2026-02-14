@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import aiosqlite
 
+    from claude_mem_lite.search.embedder import Embedder
+    from claude_mem_lite.search.lance_store import LanceStore
     from claude_mem_lite.worker.compressor import Compressor
     from claude_mem_lite.worker.summarizer import Summarizer
 
@@ -56,6 +58,7 @@ class Processor:
     MAX_ATTEMPTS = 3
     BACKOFF_BASE = 5.0
     SUMMARY_IDLE_MINUTES = 2
+    BACKFILL_LIMIT = 100
 
     def __init__(
         self,
@@ -63,15 +66,29 @@ class Processor:
         compressor: Compressor,
         idle_tracker: IdleTracker,
         summarizer: Summarizer | None = None,
+        lance_store: LanceStore | None = None,
+        embedder: Embedder | None = None,
     ):
         self.db = db
         self.compressor = compressor
         self.idle_tracker = idle_tracker
         self.summarizer = summarizer
+        self.lance_store = lance_store
+        self.embedder = embedder
 
     async def run(self):
         """Main processing loop — runs as asyncio task."""
         await self.recover_orphaned_items()
+
+        # Phase 4: one-time backfill of pre-existing observations
+        if self.lance_store and self.embedder and self.embedder.available:
+            try:
+                count = await self.backfill_embeddings()
+                if count > 0:
+                    logger.info("Backfilled %d observations", count)
+            except Exception:
+                logger.warning("Backfill failed", exc_info=True)
+
         while not self.idle_tracker.should_shutdown:
             items = await self.dequeue_batch()
             if items:
@@ -120,15 +137,55 @@ class Processor:
                 tool_name=item.tool_name,
                 files_touched=item.files_touched,
             )
-            await self._store_observation(item, result)
+            obs_id = await self._store_observation(item, result)
+
+            # Phase 4: embed after compress (non-fatal)
+            await self._embed_observation(obs_id, item, result)
+
             await self._mark_done(item.id)
         except RetryableError as e:
             await self._handle_retry(item, e)
         except NonRetryableError as e:
             await self._mark_error(item.id, str(e))
 
-    async def _store_observation(self, item: PendingQueueItem, result: CompressedObservation):
-        """Store compressed observation in the observations table."""
+    async def _embed_observation(
+        self,
+        obs_id: str,
+        item: PendingQueueItem,
+        result: CompressedObservation,
+    ) -> None:
+        """Embed observation into LanceDB. Non-fatal on failure."""
+        if not self.lance_store or not self.embedder or not self.embedder.available:
+            return
+
+        try:
+            await asyncio.to_thread(
+                self.lance_store.add_observation,
+                obs_id=obs_id,
+                session_id=item.session_id,
+                title=result.title,
+                summary=result.summary,
+                files_touched=",".join(result.files_touched),
+                functions_changed=",".join(fc.name for fc in result.functions_changed),
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            await self.db.execute(
+                "UPDATE observations SET embedding_status = 'embedded' WHERE id = ?",
+                (obs_id,),
+            )
+            await self.db.commit()
+        except Exception:
+            logger.warning("Embedding failed for %s", obs_id, exc_info=True)
+            await self.db.execute(
+                "UPDATE observations SET embedding_status = 'failed' WHERE id = ?",
+                (obs_id,),
+            )
+            await self.db.commit()
+
+    async def _store_observation(
+        self, item: PendingQueueItem, result: CompressedObservation
+    ) -> str:
+        """Store compressed observation in the observations table. Returns obs_id."""
         obs_id = str(uuid.uuid4())
         functions_json = json.dumps([fc.model_dump() for fc in result.functions_changed])
         files_json = json.dumps(result.files_touched)
@@ -156,6 +213,7 @@ class Processor:
             (item.session_id,),
         )
         await self.db.commit()
+        return obs_id
 
     async def _mark_done(self, item_id: str):
         await self.db.execute(
@@ -209,6 +267,49 @@ class Processor:
 
         if count > 0:
             logger.info("Recovered %d orphaned items from processing state", count)
+
+    async def backfill_embeddings(self) -> int:
+        """Embed existing observations missing from LanceDB. Returns count processed."""
+        if not self.lance_store or not self.embedder or not self.embedder.available:
+            return 0
+
+        cursor = await self.db.execute(
+            "SELECT id, session_id, title, summary, files_touched, "
+            "functions_changed, created_at "
+            "FROM observations WHERE embedding_status = 'pending' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (self.BACKFILL_LIMIT,),
+        )
+        rows = await cursor.fetchall()
+        count = 0
+
+        for row in rows:
+            row_dict = dict(row)
+            try:
+                await asyncio.to_thread(
+                    self.lance_store.add_observation,
+                    obs_id=row_dict["id"],
+                    session_id=row_dict["session_id"],
+                    title=row_dict["title"],
+                    summary=row_dict["summary"],
+                    files_touched=row_dict["files_touched"] or "",
+                    functions_changed=row_dict["functions_changed"] or "",
+                    created_at=row_dict["created_at"],
+                )
+                await self.db.execute(
+                    "UPDATE observations SET embedding_status = 'embedded' WHERE id = ?",
+                    (row_dict["id"],),
+                )
+                count += 1
+            except Exception:
+                await self.db.execute(
+                    "UPDATE observations SET embedding_status = 'failed' WHERE id = ?",
+                    (row_dict["id"],),
+                )
+                logger.warning("Backfill failed for %s", row_dict["id"], exc_info=True)
+
+        await self.db.commit()
+        return count
 
     async def _check_pending_summaries(self):
         """Detect sessions ready for summarization.

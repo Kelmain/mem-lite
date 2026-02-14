@@ -112,6 +112,12 @@ MIGRATIONS: list[tuple[int, str]] = [
         CREATE INDEX IF NOT EXISTS idx_queue_status ON pending_queue(status, priority, created_at);
         """,
     ),
+    (
+        3,
+        """
+        ALTER TABLE observations ADD COLUMN embedding_status TEXT DEFAULT 'pending';
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

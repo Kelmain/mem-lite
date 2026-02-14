@@ -11,6 +11,11 @@ dependencies = [
     "anthropic>=0.78",
     "aiosqlite>=0.22",
     "httpx>=0.27",
+    "lancedb>=0.29",
+    "sentence-transformers>=5.0",
+    "torch>=2.2",
+    "transformers>=4.51.0",
+    "pylance>=2.0.1",
 ]
 
 [project.scripts]
@@ -91,10 +96,13 @@ ignore = [
     "S101",    # assert allowed in tests
     "ARG",     # Unused arguments (fixtures)
     "PLR2004", # Magic values in tests
+    "PLC0415", # Deferred imports in test functions
+    "SLF001",  # Private member access (test internals)
 ]
 "__init__.py" = ["F401"]  # Unused imports in __init__
 "src/claude_mem_lite/hooks/*.py" = ["PLC0415"]  # Deferred imports for fast hook exit paths
 "src/claude_mem_lite/worker/*.py" = ["PLC0415"]  # Deferred imports for worker modules
+"src/claude_mem_lite/search/*.py" = ["PLC0415"]  # Deferred imports for search modules
 
 [tool.ruff.lint.isort]
 known-first-party = ["claude_mem_lite"]

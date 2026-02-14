@@ -21,9 +21,12 @@ class Config:
     compression_model: str = "claude-haiku-4-5"
     ab_test_enabled: bool = False
 
-    # Embedding (Phase 4 — config defined here for forward-compat)
+    # Embedding (Phase 4)
     embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_dim: int = 1024
+    embedding_device: str = "cpu"
+    search_limit_default: int = 5
+    search_limit_max: int = 20
 
     @property
     def db_path(self) -> Path:
