@@ -103,6 +103,7 @@ ignore = [
 "src/claude_mem_lite/hooks/*.py" = ["PLC0415"]  # Deferred imports for fast hook exit paths
 "src/claude_mem_lite/worker/*.py" = ["PLC0415"]  # Deferred imports for worker modules
 "src/claude_mem_lite/search/*.py" = ["PLC0415"]  # Deferred imports for search modules
+"src/claude_mem_lite/learnings/*.py" = ["PLC0415"]  # Deferred imports for learnings modules
 
 [tool.ruff.lint.isort]
 known-first-party = ["claude_mem_lite"]

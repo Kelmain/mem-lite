@@ -38,6 +38,9 @@ class Config:
     context_max_learnings: int = 10
     context_min_learning_confidence: float = 0.5
 
+    # Learnings (Phase 6)
+    learning_dedup_threshold: float = 0.90
+
     @property
     def db_path(self) -> Path:
         return self.base_dir / "claude-mem.db"

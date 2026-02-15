@@ -118,6 +118,21 @@ MIGRATIONS: list[tuple[int, str]] = [
         ALTER TABLE observations ADD COLUMN embedding_status TEXT DEFAULT 'pending';
         """,
     ),
+    (
+        4,
+        """
+        ALTER TABLE learnings ADD COLUMN times_seen INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE learnings ADD COLUMN source_sessions TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE learnings ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0;
+
+        UPDATE learnings
+        SET source_sessions = json_array(source_session_id)
+        WHERE source_session_id IS NOT NULL AND source_sessions = '[]';
+
+        CREATE INDEX IF NOT EXISTS idx_learnings_active
+        ON learnings(is_active, confidence DESC) WHERE is_active = 1;
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]

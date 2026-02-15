@@ -218,3 +218,56 @@ class LanceStore:
             return []
         else:
             return results
+
+    def add_learning(
+        self,
+        learning_id: str,
+        category: str,
+        content: str,
+    ) -> None:
+        """Embed and index a learning for dedup search."""
+        vector = self.embedder.embed_single(content, query_type="document")
+        self._tables["learnings_vec"].add(
+            [
+                {
+                    "learning_id": learning_id,
+                    "content": content,
+                    "category": category,
+                    "confidence": 0.5,  # Initial; not updated in LanceDB
+                    "vector": vector,
+                }
+            ]
+        )
+
+    def search_learnings(
+        self,
+        query: str,
+        limit: int = 5,
+        category: str | None = None,
+    ) -> list[dict]:
+        """Semantic search over learnings for dedup.
+
+        Returns results with cosine similarity score.
+        Score is 1 - distance (LanceDB cosine returns 0 = identical, 2 = opposite).
+        """
+        table = self._tables["learnings_vec"]
+        if table.count_rows() == 0:
+            return []
+
+        vector = self.embedder.embed_single(query, query_type="document")
+        q = table.search(vector).limit(limit).metric("cosine")
+        if category:
+            q = q.where(f"category = '{category}'")
+
+        results = q.to_list()
+        # LanceDB cosine search returns _distance (0 = identical, 2 = opposite)
+        # Convert to similarity score: score = 1 - distance
+        return [
+            {
+                "learning_id": r["learning_id"],
+                "content": r["content"],
+                "category": r["category"],
+                "score": 1.0 - r.get("_distance", 1.0),
+            }
+            for r in results
+        ]

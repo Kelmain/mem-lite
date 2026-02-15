@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import aiosqlite
 
+    from claude_mem_lite.learnings.engine import LearningsEngine
+    from claude_mem_lite.learnings.healer import CallGraphHealer
     from claude_mem_lite.search.embedder import Embedder
     from claude_mem_lite.search.lance_store import LanceStore
     from claude_mem_lite.worker.compressor import Compressor
@@ -68,6 +70,8 @@ class Processor:
         summarizer: Summarizer | None = None,
         lance_store: LanceStore | None = None,
         embedder: Embedder | None = None,
+        learnings_engine: LearningsEngine | None = None,
+        call_graph_healer: CallGraphHealer | None = None,
     ):
         self.db = db
         self.compressor = compressor
@@ -75,6 +79,8 @@ class Processor:
         self.summarizer = summarizer
         self.lance_store = lance_store
         self.embedder = embedder
+        self.learnings_engine = learnings_engine
+        self.call_graph_healer = call_graph_healer
 
     async def run(self):
         """Main processing loop — runs as asyncio task."""
@@ -141,6 +147,9 @@ class Processor:
 
             # Phase 4: embed after compress (non-fatal)
             await self._embed_observation(obs_id, item, result)
+
+            # Phase 6: call graph healing from observation (non-fatal)
+            await self._post_observation(item, result)
 
             await self._mark_done(item.id)
         except RetryableError as e:
@@ -353,7 +362,71 @@ class Processor:
             session_id = row[0]
             try:
                 self.idle_tracker.touch()
-                await self.summarizer.summarize_session(session_id)
+                summary_result = await self.summarizer.summarize_session(session_id)
                 logger.info("Auto-summarized session %s", session_id)
+
+                # Phase 6: learning extraction + stale edge decay
+                await self._post_summarization(session_id, summary_result.summary)
             except Exception:
                 logger.exception("Failed to auto-summarize session %s", session_id)
+
+    async def _post_observation(
+        self,
+        item: PendingQueueItem,
+        result: CompressedObservation,
+    ) -> None:
+        """Phase 6: call graph healing after observation stored."""
+        if not self.call_graph_healer:
+            return
+        try:
+            obs_dict = {
+                "functions_changed": json.dumps([fc.name for fc in result.functions_changed]),
+            }
+            await self.call_graph_healer.confirm_edges_from_observation(obs_dict, item.session_id)
+        except Exception:
+            logger.warning("Call graph healing failed for item %s", item.id, exc_info=True)
+
+    async def _post_summarization(
+        self,
+        session_id: str,
+        summary_text: str,
+    ) -> None:
+        """Phase 6: learning extraction + stale edge decay after summarization."""
+        if not self.learnings_engine:
+            return
+        try:
+            # Get project_dir for the session
+            cursor = await self.db.execute(
+                "SELECT project_dir FROM sessions WHERE id = ?", (session_id,)
+            )
+            session_row = await cursor.fetchone()
+            if not session_row:
+                return
+            project_path = session_row["project_dir"]
+
+            # Get observations for extraction prompt
+            cursor = await self.db.execute(
+                "SELECT title, summary, detail, files_touched, functions_changed "
+                "FROM observations WHERE session_id = ? ORDER BY created_at",
+                (session_id,),
+            )
+            observations = [dict(r) for r in await cursor.fetchall()]
+
+            # Extract learnings
+            await self.learnings_engine.extract_from_session(
+                session_id=session_id,
+                summary=summary_text,
+                observations=observations,
+                project_path=project_path,
+            )
+
+            # Decay stale call graph edges
+            if self.call_graph_healer:
+                await self.call_graph_healer.decay_stale_edges(project_path)
+
+        except Exception:
+            logger.warning(
+                "Post-summarization failed for session %s",
+                session_id,
+                exc_info=True,
+            )
