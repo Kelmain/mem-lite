@@ -16,10 +16,12 @@ dependencies = [
     "torch>=2.2",
     "transformers>=4.51.0",
     "pylance>=2.0.1",
+    "typer>=0.12",
+    "rich>=14.0",
 ]
 
 [project.scripts]
-claude-mem = "claude_mem_lite.cli.install:main"
+claude-mem = "claude_mem_lite.cli.main:app"
 claude-mem-worker = "claude_mem_lite.worker.lifecycle:cli_main"
 
 [project.optional-dependencies]

@@ -1,12 +1,14 @@
-"""CLI functions for eval commands (Phase 7).
-
-Standalone functions for now -- Phase 8 wires them into Typer.
-"""
+"""CLI functions for eval commands (Phase 7) + Typer wrappers (Phase 8)."""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+import sqlite3
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated
+
+import typer
+from rich.console import Console
 
 from claude_mem_lite.eval.evaluator import (
     compute_composite_quality,
@@ -19,12 +21,13 @@ from claude_mem_lite.eval.queries import (
 )
 
 if TYPE_CHECKING:
-    import sqlite3
-
     import aiosqlite
 
     from claude_mem_lite.config import Config
     from claude_mem_lite.eval.models import BenchmarkReport
+
+eval_app = typer.Typer(help="Evaluate compression quality and system health.")
+eval_console = Console()
 
 
 def eval_compression(
@@ -215,3 +218,61 @@ def eval_health(
         return json.dumps(result, indent=2)
 
     return result
+
+
+# -----------------------------------------------------------------------
+# Typer CLI wrappers (Phase 8)
+# -----------------------------------------------------------------------
+
+
+@eval_app.command(name="compression")
+def compression_cmd(
+    limit: Annotated[int, typer.Option(help="Number of recent observations.")] = 20,
+    output_json: Annotated[bool, typer.Option("--json", help="Output as JSON.")] = False,
+    since: Annotated[str | None, typer.Option(help="Only after this date.")] = None,
+) -> None:
+    """Evaluate compression quality with deterministic scoring."""
+    from claude_mem_lite.config import Config
+    from claude_mem_lite.storage.migrations import migrate
+
+    config = Config()
+    db_path = str(config.db_path)
+
+    if not Path(db_path).exists():
+        eval_console.print("[red]Database not found.[/red]")
+        raise typer.Exit(code=1)
+
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    try:
+        result = eval_compression(
+            conn=conn, config=config, limit=limit, as_json=output_json, since=since
+        )
+        eval_console.print(result)
+    finally:
+        conn.close()
+
+
+@eval_app.command(name="health")
+def health_cmd(
+    days: Annotated[int, typer.Option(help="Number of days to analyze.")] = 7,
+    output_json: Annotated[bool, typer.Option("--json", help="Output as JSON.")] = False,
+) -> None:
+    """Show system health dashboard from event log."""
+    from claude_mem_lite.config import Config
+    from claude_mem_lite.storage.migrations import migrate
+
+    config = Config()
+    db_path = str(config.db_path)
+
+    if not Path(db_path).exists():
+        eval_console.print("[red]Database not found.[/red]")
+        raise typer.Exit(code=1)
+
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    try:
+        result = eval_health(conn=conn, days=days, as_json=output_json)
+        eval_console.print(result if isinstance(result, str) else json.dumps(result, indent=2))
+    finally:
+        conn.close()
