@@ -1,29 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "mem-lite"
+name = "claude-mem-lite"
 version = "0.1.0"
-description = "Add your description here"
+description = "Local memory for Claude Code sessions"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0",
+    "anthropic>=0.78",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=14.0",
+]
+
+[project.scripts]
+claude-mem = "claude_mem_lite.cli.main:app"
+claude-mem-worker = "claude_mem_lite.worker.lifecycle:cli_main"
+
+[project.optional-dependencies]
+worker = [
     "fastapi>=0.128",
     "uvicorn[standard]>=0.30",
-    "anthropic>=0.78",
     "aiosqlite>=0.22",
-    "httpx>=0.27",
     "lancedb>=0.29",
     "sentence-transformers>=5.0",
     "torch>=2.2",
     "transformers>=4.51.0",
     "pylance>=2.0.1",
 ]
-
-[project.scripts]
-claude-mem = "claude_mem_lite.cli.install:main"
-claude-mem-worker = "claude_mem_lite.worker.lifecycle:cli_main"
-
-[project.optional-dependencies]
 dev = [
+    "claude-mem-lite[worker]",
     "bandit>=1.9.3",
     "interrogate>=1.7.0",
     "mypy>=1.19.1",
@@ -104,6 +114,8 @@ ignore = [
 "src/claude_mem_lite/worker/*.py" = ["PLC0415"]  # Deferred imports for worker modules
 "src/claude_mem_lite/search/*.py" = ["PLC0415"]  # Deferred imports for search modules
 "src/claude_mem_lite/learnings/*.py" = ["PLC0415"]  # Deferred imports for learnings modules
+"src/claude_mem_lite/eval/*.py" = ["PLC0415"]  # Deferred imports for eval modules
+"src/claude_mem_lite/cli/*.py" = ["PLC0415"]  # Deferred imports for CLI modules
 
 [tool.ruff.lint.isort]
 known-first-party = ["claude_mem_lite"]

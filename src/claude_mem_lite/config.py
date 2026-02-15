@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import ClassVar
 
 
 @dataclass
@@ -40,6 +41,13 @@ class Config:
 
     # Learnings (Phase 6)
     learning_dedup_threshold: float = 0.90
+
+    # Pricing: $ per million tokens. Update when Anthropic changes rates.
+    MODEL_RATES: ClassVar[dict[str, dict[str, float]]] = {
+        "claude-haiku-4-5-20251001": {"input": 1.0, "output": 5.0},
+        "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
+        "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
+    }
 
     @property
     def db_path(self) -> Path:

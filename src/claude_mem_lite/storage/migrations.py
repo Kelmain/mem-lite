@@ -1,5 +1,6 @@
 """SQLite migration system using PRAGMA user_version."""
 
+import re
 import sqlite3
 
 # Each migration is (version, sql). Append-only, sequential.
@@ -133,6 +134,40 @@ MIGRATIONS: list[tuple[int, str]] = [
         ON learnings(is_active, confidence DESC) WHERE is_active = 1;
         """,
     ),
+    (
+        5,
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts
+        USING fts5(
+            title,
+            summary,
+            detail,
+            content=observations,
+            content_rowid=rowid
+        );
+
+        INSERT INTO observations_fts(rowid, title, summary, detail)
+        SELECT rowid, title, summary, COALESCE(detail, '')
+        FROM observations;
+
+        CREATE TRIGGER IF NOT EXISTS observations_fts_insert AFTER INSERT ON observations BEGIN
+            INSERT INTO observations_fts(rowid, title, summary, detail)
+            VALUES (new.rowid, new.title, new.summary, COALESCE(new.detail, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS observations_fts_update AFTER UPDATE ON observations BEGIN
+            INSERT INTO observations_fts(observations_fts, rowid, title, summary, detail)
+            VALUES ('delete', old.rowid, old.title, old.summary, COALESCE(old.detail, ''));
+            INSERT INTO observations_fts(rowid, title, summary, detail)
+            VALUES (new.rowid, new.title, new.summary, COALESCE(new.detail, ''));
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS observations_fts_delete AFTER DELETE ON observations BEGIN
+            INSERT INTO observations_fts(observations_fts, rowid, title, summary, detail)
+            VALUES ('delete', old.rowid, old.title, old.summary, COALESCE(old.detail, ''));
+        END;
+        """,
+    ),
 ]
 
 LATEST_VERSION = MIGRATIONS[-1][0]
@@ -168,5 +203,44 @@ def migrate(conn: sqlite3.Connection) -> None:
 
 
 def _split_sql(sql: str) -> list[str]:
-    """Split a multi-statement SQL string into individual statements."""
-    return [s.strip() for s in sql.strip().split(";") if s.strip()]
+    """Split a multi-statement SQL string into individual statements.
+
+    Handles BEGIN...END blocks in triggers by not splitting on semicolons
+    that appear inside these blocks.
+    """
+    statements: list[str] = []
+    buf: list[str] = []
+    depth = 0
+
+    for line in sql.splitlines():
+        upper = line.strip().upper()
+
+        # Detect BEGIN at end of line (trigger body start)
+        if re.search(r"\bBEGIN\s*$", upper):
+            depth += 1
+        buf.append(line)
+
+        # Detect END; on its own (trigger body end)
+        if re.search(r"^\s*END\s*;\s*$", line, re.IGNORECASE) and depth > 0:
+            depth -= 1
+            if depth == 0:
+                statements.append("\n".join(buf).strip())
+                buf = []
+            continue
+
+        # Outside trigger bodies, split on ;
+        if depth == 0 and ";" in line:
+            full = "\n".join(buf)
+            parts = full.split(";")
+            for part in parts[:-1]:
+                stmt = part.strip()
+                if stmt:
+                    statements.append(stmt)
+            remainder = parts[-1].strip()
+            buf = [remainder] if remainder else []
+
+    leftover = "\n".join(buf).strip().rstrip(";").strip()
+    if leftover:
+        statements.append(leftover)
+
+    return statements
