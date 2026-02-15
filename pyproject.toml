@@ -104,6 +104,8 @@ ignore = [
 "src/claude_mem_lite/worker/*.py" = ["PLC0415"]  # Deferred imports for worker modules
 "src/claude_mem_lite/search/*.py" = ["PLC0415"]  # Deferred imports for search modules
 "src/claude_mem_lite/learnings/*.py" = ["PLC0415"]  # Deferred imports for learnings modules
+"src/claude_mem_lite/eval/*.py" = ["PLC0415"]  # Deferred imports for eval modules
+"src/claude_mem_lite/cli/*.py" = ["PLC0415"]  # Deferred imports for CLI modules
 
 [tool.ruff.lint.isort]
 known-first-party = ["claude_mem_lite"]
