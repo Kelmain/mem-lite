@@ -12,7 +12,7 @@ import pytest
 from claude_mem_lite.hooks.capture import _process_event as capture_process_event
 from claude_mem_lite.hooks.cleanup import _process_event as cleanup_process_event
 from claude_mem_lite.hooks.context import (
-    _build_minimal_context,
+    _get_basic_context,
     _process_event as context_process_event,
 )
 from claude_mem_lite.hooks.summary import (
@@ -197,7 +197,7 @@ class TestCapture:
 # TestContext -- 5 tests
 # ---------------------------------------------------------------------------
 class TestContext:
-    """Tests for context.py (_process_event, _build_minimal_context)."""
+    """Tests for context.py (_process_event, _get_basic_context)."""
 
     def test_context_creates_session(self, store):
         """SessionStart event creates a session in the DB."""
@@ -222,19 +222,19 @@ class TestContext:
         assert len(sessions) == 1
 
     def test_context_builds_minimal_context(self, store):
-        """_build_minimal_context returns header and session entries."""
+        """_get_basic_context returns header and session entries."""
         store.create_session(project_dir="/proj/a")
         store.create_session(project_dir="/proj/b")
         store.create_session(project_dir="/proj/c")
 
-        result = _build_minimal_context(store)
+        result = _get_basic_context(store)
         assert "Recent Sessions" in result
         # Should have at least some session entries
         assert result.count("-") >= 3  # dash-prefixed list items
 
     def test_context_empty_db_returns_empty(self, store):
-        """_build_minimal_context with no sessions returns empty string."""
-        result = _build_minimal_context(store)
+        """_get_basic_context with no sessions returns empty string."""
+        result = _get_basic_context(store)
         assert result == ""
 
     def test_context_uses_claude_project_dir(self, store):

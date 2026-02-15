@@ -28,6 +28,16 @@ class Config:
     search_limit_default: int = 5
     search_limit_max: int = 20
 
+    # Context injection (Phase 5)
+    context_budget: int = 2000
+    context_worker_timeout_s: float = 5.0
+    context_fallback_db_timeout_s: float = 3.0
+    context_max_sessions: int = 10
+    context_max_functions: int = 30
+    context_max_observations: int = 10
+    context_max_learnings: int = 10
+    context_min_learning_confidence: float = 0.5
+
     @property
     def db_path(self) -> Path:
         return self.base_dir / "claude-mem.db"

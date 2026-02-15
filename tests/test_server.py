@@ -87,13 +87,16 @@ async def test_health_endpoint(tmp_config, store, client, configured_app):
     assert health.uptime_s >= 0
 
 
-async def test_context_placeholder(client):
-    """GET /api/context returns empty context placeholder."""
+async def test_context_endpoint(client):
+    """GET /api/context returns context with expected keys."""
     response = await client.get("/api/context")
 
     assert response.status_code == 200
     data = response.json()
-    assert data == {"context": "", "tokens": 0}
+    assert data["context"] == ""
+    assert data["tokens"] == 0
+    assert "layers" in data
+    assert "build_ms" in data
 
 
 async def test_queue_stats(tmp_config, store, client):

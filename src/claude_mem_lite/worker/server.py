@@ -124,10 +124,26 @@ async def health() -> HealthResponse:
 
 
 @app.get("/api/context")
-async def context() -> dict:
-    """Context injection placeholder (Phase 5)."""
+async def context(project_path: str = "") -> dict:
+    """Build and return context for SessionStart injection."""
     app.state.idle_tracker.touch()
-    return {"context": "", "tokens": 0}
+
+    from claude_mem_lite.context.builder import ContextBuilder
+
+    builder = ContextBuilder(
+        db=app.state.db,
+        lance_store=getattr(app.state, "lance_store", None),
+        budget=app.state.config.context_budget,
+        project_dir=project_path,
+    )
+    result = await builder.build()
+
+    return {
+        "context": result.text,
+        "tokens": result.total_tokens,
+        "layers": result.layers_included,
+        "build_ms": round(result.build_time_ms, 1),
+    }
 
 
 @app.post("/api/summarize")
