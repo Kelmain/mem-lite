@@ -13,8 +13,10 @@ app = typer.Typer(
 
 def _register_commands() -> None:
     """Register all CLI commands and sub-apps."""
+    from claude_mem_lite.cli.compress_cmd import compress_cmd
     from claude_mem_lite.cli.eval_cmd import eval_app
     from claude_mem_lite.cli.mermaid_cmd import mermaid_cmd
+    from claude_mem_lite.cli.prune_cmd import prune_cmd
     from claude_mem_lite.cli.report import report_cmd
     from claude_mem_lite.cli.search_cmd import search_cmd
     from claude_mem_lite.cli.status_cmd import status_cmd
@@ -23,6 +25,8 @@ def _register_commands() -> None:
     app.command(name="search")(search_cmd)
     app.command(name="mermaid")(mermaid_cmd)
     app.command(name="status")(status_cmd)
+    app.command(name="compress")(compress_cmd)
+    app.command(name="prune")(prune_cmd)
     app.add_typer(eval_app, name="eval")
 
 
