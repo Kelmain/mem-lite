@@ -105,7 +105,9 @@ class Learning(BaseModel):
     category: LearningCategory
     content: str
     confidence: float = 0.5
-    source_session_id: str
+    times_seen: int = 1
+    source_sessions: str = "[]"  # JSON array of session IDs
+    is_manual: bool = False
     is_active: bool = True
     created_at: str
     updated_at: str
