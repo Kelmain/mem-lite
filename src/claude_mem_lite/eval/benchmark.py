@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -56,10 +57,29 @@ class BenchmarkRunner:
         3. Score each compression (deterministic + QAG)
         4. Produce paired comparison report
         """
+        start = time.monotonic()
+        await self._log_event(
+            "eval.benchmark.start",
+            {
+                "model_a": model_a,
+                "model_b": model_b,
+                "sample_size": sample_size,
+                "judge_model": judge_model,
+            },
+        )
+
         samples = await self._sample_raw_outputs(sample_size)
 
         if not samples:
-            return self._build_report([], model_a, model_b)
+            report = self._build_report([], model_a, model_b)
+            await self._log_event(
+                "eval.benchmark.done",
+                {
+                    "sample_size": 0,
+                    "duration_ms": int((time.monotonic() - start) * 1000),
+                },
+            )
+            return report
 
         results: list[PairedResult] = []
         for sample in samples:
@@ -73,7 +93,29 @@ class BenchmarkRunner:
                     exc_info=True,
                 )
 
-        return self._build_report(results, model_a, model_b)
+        report = self._build_report(results, model_a, model_b)
+        await self._log_event(
+            "eval.benchmark.done",
+            {
+                "sample_size": report.sample_size,
+                "a_wins": report.a_wins,
+                "b_wins": report.b_wins,
+                "ties": report.ties,
+                "duration_ms": int((time.monotonic() - start) * 1000),
+            },
+        )
+        return report
+
+    async def _log_event(self, event_type: str, data: dict) -> None:
+        """Best-effort event logging to event_log table."""
+        try:
+            await self.db.execute(
+                "INSERT INTO event_log (id, event_type, data) VALUES (?, ?, ?)",
+                (str(uuid.uuid4()), event_type, json.dumps(data)),
+            )
+            await self.db.commit()
+        except Exception:
+            logger.debug("Failed to log %s event", event_type)
 
     async def _sample_raw_outputs(self, n: int) -> list[QueueSample]:
         """Sample diverse raw outputs for benchmarking."""

@@ -1246,3 +1246,55 @@ class TestCLILearnings:
         ).fetchone()
         assert row[0] == 0
         conn.close()
+
+
+# -----------------------------------------------------------------------
+# Gap fix tests
+# -----------------------------------------------------------------------
+
+
+class TestGapFixes:
+    """Tests for confirmed gap fixes in Phase 6."""
+
+    async def test_contradiction_logs_event(self, async_db, tmp_config):
+        """Contradiction handler logs learning.contradiction to event_log."""
+        from claude_mem_lite.learnings.engine import LearningsEngine
+
+        await _seed_learning(async_db, "L1", "convention", "Use tabs", 0.7, "s1")
+
+        client = _mock_client("{}")
+        engine = LearningsEngine(async_db, client, None, tmp_config)
+
+        candidate = {
+            "category": "convention",
+            "content": "Use spaces",
+            "confidence": 0.6,
+            "contradicts": "Use tabs",
+        }
+        await engine._process_candidate(candidate, "session-2", "/test/project")
+
+        cursor = await async_db.execute(
+            "SELECT data FROM event_log WHERE event_type = 'learning.contradiction'"
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        data = json.loads(row["data"])
+        assert data["old_id"] == "L1"
+        assert data["old_confidence"] == 0.7
+        assert data["new_confidence"] < 0.7
+
+    async def test_get_active_learnings_limited_to_30(self, async_db, tmp_config):
+        """_get_active_learnings returns at most 30 results."""
+        from claude_mem_lite.learnings.engine import LearningsEngine
+
+        # Seed 35 learnings
+        for i in range(35):
+            await _seed_learning(
+                async_db, f"L{i}", "convention", f"Learning {i}", 0.5 + i * 0.01, "s1"
+            )
+
+        client = _mock_client("{}")
+        engine = LearningsEngine(async_db, client, None, tmp_config)
+        result = await engine._get_active_learnings("/test/project")
+
+        assert len(result) == 30

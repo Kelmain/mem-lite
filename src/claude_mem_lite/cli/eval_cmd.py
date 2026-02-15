@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
@@ -108,6 +111,17 @@ def eval_compression(
                 "deterministic": det.model_dump(),
                 "composite_quality": quality,
             }
+        )
+
+    # Log eval event (best-effort)
+    with contextlib.suppress(Exception):
+        conn.execute(
+            "INSERT INTO event_log (id, event_type, data) VALUES (?, ?, ?)",
+            (
+                str(uuid.uuid4()),
+                "eval.compression",
+                json.dumps({"count": len(results), "limit": limit, "since": since}),
+            ),
         )
 
     if as_json:
@@ -276,3 +290,59 @@ def health_cmd(
         eval_console.print(result if isinstance(result, str) else json.dumps(result, indent=2))
     finally:
         conn.close()
+
+
+@eval_app.command(name="benchmark")
+def benchmark_cmd(
+    model_a: Annotated[
+        str, typer.Option(help="First model for comparison.")
+    ] = "claude-haiku-4-5-20251001",
+    model_b: Annotated[
+        str, typer.Option(help="Second model for comparison.")
+    ] = "claude-sonnet-4-5-20250929",
+    samples: Annotated[int, typer.Option(help="Number of samples to compare.")] = 30,
+    judge_model: Annotated[
+        str, typer.Option(help="Model for QAG judging.")
+    ] = "claude-sonnet-4-5-20250929",
+    output_json: Annotated[bool, typer.Option("--json", help="Output as JSON.")] = False,
+) -> None:
+    """Run offline A/B benchmark comparing two compression models."""
+    import anthropic
+
+    from claude_mem_lite.config import Config
+    from claude_mem_lite.storage.migrations import migrate
+
+    config = Config()
+    db_path = str(config.db_path)
+
+    if not Path(db_path).exists():
+        eval_console.print("[red]Database not found.[/red]")
+        raise typer.Exit(code=1)
+
+    async def _run() -> BenchmarkReport | str:
+        import aiosqlite
+
+        db = await aiosqlite.connect(db_path)
+        db.row_factory = aiosqlite.Row
+        client = anthropic.AsyncAnthropic()
+        try:
+            return await eval_benchmark(
+                db=db,
+                client=client,
+                config=config,
+                model_a=model_a,
+                model_b=model_b,
+                samples=samples,
+                judge_model=judge_model,
+                as_json=output_json,
+            )
+        finally:
+            await db.close()
+
+    # Sync migration before async run
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    result = asyncio.run(_run())
+    eval_console.print(result)

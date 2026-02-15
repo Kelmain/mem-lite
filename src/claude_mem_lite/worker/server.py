@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from claude_mem_lite.worker.summarizer import Summarizer
 if TYPE_CHECKING:
     from claude_mem_lite.config import Config
 
+logger = logging.getLogger(__name__)
 
 _start_time: float = 0.0
 
@@ -52,6 +54,10 @@ async def lifespan(app: FastAPI):
 
     embedder = Embedder(config)
     embed_loaded = await asyncio.to_thread(embedder.load)
+    if embed_loaded:
+        logger.info(
+            "Embedding model loaded: %s (dim=%d)", config.embedding_model, config.embedding_dim
+        )
 
     lance_store = LanceStore(config, embedder)
     await asyncio.to_thread(lance_store.connect)

@@ -735,3 +735,79 @@ class TestSQLQueries:
         rows = cursor.fetchall()
         assert isinstance(rows, list)
         conn.close()
+
+
+# -----------------------------------------------------------------------
+# Gap fix tests (5 tests)
+# -----------------------------------------------------------------------
+
+
+class TestGapFixes:
+    """Tests for confirmed gap fixes."""
+
+    def test_eval_compression_logs_event(self, tmp_config):
+        """eval_compression logs an eval.compression event to event_log."""
+        from claude_mem_lite.cli.eval_cmd import eval_compression
+
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        migrate(conn)
+
+        now = datetime.now(UTC).isoformat()
+        conn.execute(
+            "INSERT INTO sessions (id, project_dir, started_at, status) VALUES (?, ?, ?, ?)",
+            ("test-session", "/tmp/project", now, "active"),
+        )
+        conn.execute(
+            "INSERT INTO observations "
+            "(id, session_id, tool_name, title, summary, tokens_raw, tokens_compressed, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("obs-1", "test-session", "Write", "Add auth", "Added auth.", 5000, 120, now),
+        )
+        conn.execute(
+            "INSERT INTO pending_queue "
+            "(id, session_id, tool_name, raw_output, status, attempts) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("obs-1", "test-session", "Write", "raw output", "done", 1),
+        )
+        conn.commit()
+
+        eval_compression(conn=conn, config=tmp_config, limit=5, as_json=False, since=None)
+
+        events = conn.execute(
+            "SELECT * FROM event_log WHERE event_type = 'eval.compression'"
+        ).fetchall()
+        assert len(events) == 1
+        data = json.loads(events[0][3])  # data column
+        assert data["count"] == 1
+        conn.close()
+
+    async def test_benchmark_logs_start_and_done_events(self, tmp_config):
+        """BenchmarkRunner logs eval.benchmark.start and eval.benchmark.done events."""
+        from claude_mem_lite.eval.benchmark import BenchmarkRunner
+
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        migrate(conn)
+        conn.close()
+
+        import aiosqlite
+
+        db = await aiosqlite.connect(str(tmp_config.db_path))
+        db.row_factory = aiosqlite.Row
+
+        runner = BenchmarkRunner(db=db, client=AsyncMock(), config=tmp_config)
+        await runner.run(sample_size=0)
+
+        cursor = await db.execute("SELECT event_type FROM event_log ORDER BY created_at")
+        rows = await cursor.fetchall()
+        event_types = [row["event_type"] for row in rows]
+
+        assert "eval.benchmark.start" in event_types
+        assert "eval.benchmark.done" in event_types
+        await db.close()
+
+    def test_benchmark_typer_command_registered(self):
+        """The 'benchmark' command is registered in eval_app."""
+        from claude_mem_lite.cli.eval_cmd import eval_app
+
+        command_names = [cmd.name for cmd in eval_app.registered_commands]
+        assert "benchmark" in command_names

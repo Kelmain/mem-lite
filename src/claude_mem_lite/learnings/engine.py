@@ -122,7 +122,7 @@ class LearningsEngine:
         cursor = await self.db.execute(
             "SELECT id, category, content, confidence FROM learnings "
             "WHERE is_active = 1 "
-            "ORDER BY confidence DESC"
+            "ORDER BY confidence DESC LIMIT 30"
         )
         rows = await cursor.fetchall()
         return [
@@ -230,6 +230,23 @@ class LearningsEngine:
                 old_row["id"],
                 old_row["confidence"],
                 new_conf,
+            )
+            # Log contradiction to structured event_log
+            await self.db.execute(
+                "INSERT INTO event_log (id, session_id, event_type, data) "
+                "VALUES (?, ?, 'learning.contradiction', ?)",
+                (
+                    str(uuid.uuid4()),
+                    session_id,
+                    json.dumps(
+                        {
+                            "old_id": old_row["id"],
+                            "old_confidence": old_row["confidence"],
+                            "new_confidence": new_conf,
+                            "new_content": candidate["content"][:200],
+                        }
+                    ),
+                ),
             )
 
         # Insert new as fresh entry
